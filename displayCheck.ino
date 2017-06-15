@@ -32,14 +32,12 @@ DeviceAddress insideThermometer;
 
 #define MINUTES 5
 float tempC;
-char ssid[40];
-char password[40];
-char auth[] = "2e46004acfa446649327e04bad56fe22";
+char ssid[] ="Termometer"; // Neame of the access point
+char auth[] = "2e46004acfa446649327e04bad56fe22"; // Authentication key to Blynk
 String message, Timestring, t_ssdi, t_pw, st, content;
 IPAddress currentIP;
 unsigned long Myhour, Myminute, Mysecond, Myyear, Mymonth, Myday, leap;
 
-// struct StoreWiFi { char sd[32]; char pw[32]; };
 char epromdata[512];
 byte epromdirty = 0;
 
@@ -53,6 +51,7 @@ unsigned long currentSecond;
 byte PWonFlag = 0;
 int wifipoints,i,j,numnets,buf_pointer,wifi_cause;
 ESP8266WebServer server(80);
+String qsid, qpass; //Holds the new credentials from AP
 
 
 
@@ -85,8 +84,8 @@ void setup()
 	MyLcd.clearDisplay();
 	MyLcd.setFont();
 	MyLcd.setCursor(0, 38);
-//	loadCredentials();
 	int n = WiFi.scanNetworks(); //  Check if any WiFi in grange
+	Serial.println(n);
 	if (!n)
 	{
 	// No access points in range - just be a thermometer
@@ -97,6 +96,8 @@ void setup()
 	}
 // Check for known access points to connect
 	wifi_cause = ConnectWiFi();
+	Serial.print("Wifi cause: ");
+	Serial.println(wifi_cause);
 	switch (wifi_cause)
 	{
 	case 0: //Everything with normal WiFi connection goes here
@@ -119,9 +120,13 @@ void setup()
 	case 2: //No known networks
 	{
 		message = "No known net's";
-		MyLcd.setCursor((84 - 6 * message.length()) / 2, 38);
+		MyLcd.setCursor((84 - 6 * message.length()) / 2, 0);
 		MyLcd.print(message);
+		MyLcd.print("Starting AP");
+		MyLcd.setCursor((84 - 6 * 11) / 2, 12);
 		MyLcd.display();
+		setupAP();
+
 	}
 	break;
 	}
@@ -165,10 +170,10 @@ void loop()
 	{
 		SleepTimer.run();
 		Blynk.run();
+		//	digitalWrite(led, 0);
+		ShowDisplay();
+		BatteryV = float(analogRead(A0) / float(1024)*8.86);
 	}
-	//	digitalWrite(led, 0);
-	ShowDisplay();
-	BatteryV = float(analogRead(A0) / float(1024)*8.86);
 }
 
 void SetupTemeratureSensor()
@@ -337,6 +342,7 @@ int ConnectWiFi()
 {
 	int n = WiFi.scanNetworks();
 	buf_pointer = 1;
+	if (numnets == 0) return 2;
 	for (i = 0; i < numnets; i++)
 	{
 		t_ssdi = String(epromdata + buf_pointer);
@@ -353,7 +359,7 @@ int ConnectWiFi()
 				{
 					if (WiFi.status() == WL_CONNECTED)
 					{
-						return 0;
+						return 2;
 					}
 					MyLcd.print("Connecting ");
 					MyLcd.print(c);
@@ -389,25 +395,35 @@ void setupAP(void)
 	WiFi.softAP(ssid);
 	launchWeb();
 }
+
 void launchWeb(void)
 {
 
 	server.on("/", []() {
 		IPAddress ip = WiFi.softAPIP();
 		String ipStr = String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3]);
-		content = "<!DOCTYPE HTML>\r\n<html>Hello from ESP8266 at ";
+		content = "<!DOCTYPE HTML>\r\n";
+//		content += "<html xmlns = \"http://www.w3.org/1999/xhtml\">\r\n";
+		content += "<head>\r\n";
+//		content += "<meta name="viewport" content="width=device-width, initial-scale=1" />\r\n";
+		content += "<title>Точка за достъп</title>";
+		content += "<head>\r\n";
 		content += ipStr;
 		content += "<p>";
 		content += st;
 		content += "</p><form method='get' action='setting'><label>SSID: </label><input name='ssid' length=32><input name='pass' length=64><input type='submit'></form>";
 		content += "</html>";
-		server.send(200, "text/html", content);
+		server.send(200, "text/html; charset=utf-8", content);
 	});
+	Serial.println(content);
 	server.on("/setting", []() {
-		String qsid = server.arg("ssid");
-		String qpass = server.arg("pass");
-		if (qsid.length() > 0 && qpass.length() > 0) {
+		qsid = server.arg("ssid");
+		qpass = server.arg("pass");
+		if (qsid.length() > 0 && qpass.length() > 0) 
+		{
 			// Should write qsid & qpass to EEPROM
+			if (wifi_cause == 1) remove_ssdi();
+			append_ssdi();
 			content = "<!DOCTYPE HTML>\r\n<html>";
 			content += "<p>saved to eeprom... reset to boot into new wifi</p></html>";
 		}
@@ -417,4 +433,42 @@ void launchWeb(void)
 		server.send(200, "text/html", content);
 	});
 	server.begin();
+}
+
+void append_ssdi(void) 
+{
+	epromdata[0]++;
+	for (i = 0; i < qsid.length(); i++)
+		epromdata[i + buf_pointer] = qsid[i];
+	buf_pointer += qsid.length();
+	epromdata[buf_pointer] = 0;
+	buf_pointer++;
+	for (i = 0; i < qpass.length(); i++)
+		epromdata[i + buf_pointer] = qpass[i];
+	buf_pointer += qpass.length();
+	epromdata[buf_pointer] = 0;
+	buf_pointer++;
+	for (i = 0; i < 32; i++)
+	{
+		Serial.print(16 * i, HEX);
+		Serial.print("  ");
+		for (j = 0; j < 16; j++)
+		{
+			Serial.print(epromdata[i * 16 + j], HEX);
+			Serial.print(" ");
+		}
+		for (j = 0; j < 16; j++)
+		{
+			Serial.print(char(epromdata[i * 16 + j]));
+		}
+		Serial.println();
+	}
+	EEPROM.put(0, epromdata);
+	EEPROM.commit();
+	delay(500);
+}
+
+void remove_ssdi(void)
+{
+
 }
