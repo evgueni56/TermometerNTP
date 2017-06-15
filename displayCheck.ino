@@ -126,7 +126,8 @@ void setup()
 		MyLcd.setCursor((84 - 6 * 11) / 2, 12);
 		MyLcd.display();
 		setupAP();
-
+		Serial.println("In Setup");
+		Serial.println(content.c_str());
 	}
 	break;
 	}
@@ -359,7 +360,7 @@ int ConnectWiFi()
 				{
 					if (WiFi.status() == WL_CONNECTED)
 					{
-						return 2;
+						return 0;
 					}
 					MyLcd.print("Connecting ");
 					MyLcd.print(c);
@@ -398,6 +399,8 @@ void setupAP(void)
 
 void launchWeb(void)
 {
+	Serial.println("In Start");
+	Serial.println(content);
 
 	server.on("/", []() {
 		IPAddress ip = WiFi.softAPIP();
@@ -405,7 +408,7 @@ void launchWeb(void)
 		content = "<!DOCTYPE HTML>\r\n";
 //		content += "<html xmlns = \"http://www.w3.org/1999/xhtml\">\r\n";
 		content += "<head>\r\n";
-//		content += "<meta name="viewport" content="width=device-width, initial-scale=1" />\r\n";
+//		content += "<meta name="viewport" content="width=device-width, initial-scale=1.5" />\r\n";
 		content += "<title>Точка за достъп</title>";
 		content += "<head>\r\n";
 		content += ipStr;
@@ -415,7 +418,7 @@ void launchWeb(void)
 		content += "</html>";
 		server.send(200, "text/html; charset=utf-8", content);
 	});
-	Serial.println(content);
+	Serial.println(content.c_str());
 	server.on("/setting", []() {
 		qsid = server.arg("ssid");
 		qpass = server.arg("pass");
@@ -432,7 +435,11 @@ void launchWeb(void)
 		}
 		server.send(200, "text/html", content);
 	});
+	Serial.println("In Server");
+	Serial.println(content.c_str());
+
 	server.begin();
+
 }
 
 void append_ssdi(void) 
@@ -470,5 +477,11 @@ void append_ssdi(void)
 
 void remove_ssdi(void)
 {
+	int block = t_ssdi.length() + t_pw.length() + 2;
+
+	int old_pointer = buf_pointer - block; //Dest. pointer - points the ssdi to be removed
+	for (i = 0; i < 512-buf_pointer; i++)
+		epromdata[old_pointer + i] = epromdata[buf_pointer + i];
+	epromdata[0]--;
 
 }
