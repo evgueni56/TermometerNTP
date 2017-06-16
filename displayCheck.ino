@@ -52,14 +52,10 @@ int wifipoints,i,j,numnets,buf_pointer,wifi_cause;
 ESP8266WebServer server(80);
 String qsid, qpass; //Holds the new credentials from AP
 
-
-
 // LCD Object
-Adafruit_PCD8544 MyLcd = Adafruit_PCD8544(12, 5, 4);
+Adafruit_PCD8544 MyLcd = Adafruit_PCD8544(14, 13, 12, 5, 4); //software SPI - is it better? For hardware: Adafruit_PCD8544(12, 5, 4)
 
-
-
-
+//----------------------------------------------------------------------------------------------------------------------------
 
 void setup()
 {
