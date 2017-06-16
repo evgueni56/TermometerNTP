@@ -39,7 +39,6 @@ IPAddress currentIP;
 unsigned long Myhour, Myminute, Mysecond, Myyear, Mymonth, Myday, leap;
 
 char epromdata[512];
-byte epromdirty = 0;
 
 const int led = 0;
 int pinValue = 1;
@@ -78,12 +77,12 @@ void setup()
 
 	// Nokia Display
 	MyLcd.begin();
-	
 	MyLcd.setContrast(50);
 	MyLcd.setTextColor(BLACK);
 	MyLcd.clearDisplay();
 	MyLcd.setFont();
-	MyLcd.setCursor(0, 38);
+	MyLcd.setCursor(0, 0);
+
 	int n = WiFi.scanNetworks(); //  Check if any WiFi in grange
 	Serial.println(n);
 	if (!n)
@@ -106,15 +105,16 @@ void setup()
 		MyLcd.setFont();
 		GetNtpTime();
 		Blynk.config(auth);
-}
+	}
 	break;
 	case 1: //A known network does not connect
 	{
 		message = "No "+t_ssdi;
+		MyLcd.clearDisplay();
 		MyLcd.setCursor((84 - 6 * message.length()) / 2, 38);
 		MyLcd.print(message);
 		MyLcd.display();
-
+		setupAP();
 	}
 	break;
 	case 2: //No known networks
@@ -126,8 +126,6 @@ void setup()
 		MyLcd.setCursor((84 - 6 * 11) / 2, 12);
 		MyLcd.display();
 		setupAP();
-		Serial.println("In Setup");
-		Serial.println(content.c_str());
 	}
 	break;
 	}
@@ -356,25 +354,37 @@ int ConnectWiFi()
 			{
 				int c = 0;
 				WiFi.begin(t_ssdi.c_str(), t_pw.c_str());
+				MyLcd.print("Connecting ");
+				MyLcd.display();
 				while (c < 20)
 				{
 					if (WiFi.status() == WL_CONNECTED)
 					{
+						MyLcd.setCursor(0, 0);
+						MyLcd.print("Connected to:");
+						MyLcd.setCursor(0, 14);
+						MyLcd.print(" "); // Instead of "clear"
+						MyLcd.setCursor(0, 14);
+						MyLcd.print(t_ssdi.c_str());
+						MyLcd.display();
+						delay(1000);
 						return 0;
 					}
-					MyLcd.print("Connecting ");
+					MyLcd.setCursor(0, 14);
+					MyLcd.print(" "); // Instead of "clear"
+					MyLcd.setCursor(0, 14);
 					MyLcd.print(c);
 					MyLcd.display();
 					delay(500);
 					c++;
 				}
-				return 2;
+				return 1;
 			}
 
 		}
 
 	}
-	return 1;
+	return 2;
 }
 
 void setupAP(void)
@@ -408,7 +418,7 @@ void launchWeb(void)
 		content = "<!DOCTYPE HTML>\r\n";
 //		content += "<html xmlns = \"http://www.w3.org/1999/xhtml\">\r\n";
 		content += "<head>\r\n";
-//		content += "<meta name="viewport" content="width=device-width, initial-scale=1.5" />\r\n";
+		content += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\r\n";
 		content += "<title>Точка за достъп</title>";
 		content += "<head>\r\n";
 		content += ipStr;
@@ -477,11 +487,24 @@ void append_ssdi(void)
 
 void remove_ssdi(void)
 {
+	epromdata[0]--;
+	if (epromdata[0] == 0)
+	{
+		buf_pointer = 1;
+		return; // No saved networks left
+	}
 	int block = t_ssdi.length() + t_pw.length() + 2;
 
 	int old_pointer = buf_pointer - block; //Dest. pointer - points the ssdi to be removed
 	for (i = 0; i < 512-buf_pointer; i++)
 		epromdata[old_pointer + i] = epromdata[buf_pointer + i];
-	epromdata[0]--;
-
+// Adjust the pointer
+	buf_pointer = 1;
+	for (i = 0; i < epromdata[0]; i++)
+	{
+		t_ssdi = String(epromdata + buf_pointer);
+		buf_pointer += t_ssdi.length() + 1;
+		t_pw = String(epromdata + buf_pointer);
+		buf_pointer += t_pw.length() + 1;
+	}
 }
