@@ -37,6 +37,7 @@ char auth[] = "2e46004acfa446649327e04bad56fe22"; // Authentication key to Blynk
 String message, Timestring, t_ssdi, t_pw, st, content;
 // IPAddress currentIP;
 unsigned long Myhour, Myminute, Mysecond, Myyear, Mymonth, Myday, leap;
+byte DST; // Daylight Saving flag
 
 char epromdata[512];
 
@@ -75,14 +76,14 @@ void setup()
 		rtcData.PWonFlag = 0;
 		Serial.println("Wrong CRC");
 	}
-	rst_info *rinfo = ESP.getResetInfoPtr();
-	Serial.print(String("\nResetInfo.reason = ") + (*rinfo).reason + ": " + ESP.getResetReason() + "\n");
-	Serial.println(String("RTC value = ") + system_get_rtc_time());
 	rtcData.currentSecond += MINUTES * 60;
 	setTime(rtcData.currentSecond); // set internal timer
 	EEPROM.begin(512);
 	EEPROM.get(0, epromdata);
 	numnets = epromdata[0];
+	DST = epromdata[511];
+	Serial.println(String("\nDST flag = ") + DST);
+	adjustDST();
 	pinMode(led, OUTPUT);
 	digitalWrite(led, 1);
 	Wire.begin();
@@ -241,12 +242,15 @@ void GetNtpTime(void)
 
 	if (rtcData.PWonFlag != 7) // Either power on or no NTP time yet
 	{
-		rtcData.currentSecond = UnixTimeSec() + 3600 * 3; // Unix Seconds adjusted for the local time
-		if (rtcData.currentSecond == 3600 * 3)
+		rtcData.currentSecond = UnixTimeSec() + 3600 * 2; // Unix Seconds adjusted for the local time
+		if (rtcData.currentSecond == 3600 * 2)
 		{
 			return; // No connection to NTP
 		}
 		setTime(rtcData.currentSecond); // set internal timer
+		Serial.println(String("Current time: ") + hour() + ":" + minute() + ":" + second());
+		if (DST) adjustTime(3600);
+		Serial.println(String("Adjusted time: ") + hour() + ":" + minute() + ":" + second());
 		rtcData.PWonFlag = 7;
 	}
 	// Populate date/time variables
@@ -457,7 +461,7 @@ bool append_ssdi(void)
 	buf_pointer += qpass.length();
 	epromdata[buf_pointer] = 0;
 	buf_pointer++;
-	if (buf_pointer > 512) return FALSE; // Exceeded the EEPROM size
+	if (buf_pointer > 511) return FALSE; // Exceeded the EEPROM size
 	EEPROM.put(0, epromdata);
 	EEPROM.commit();
 	delay(500);
@@ -507,3 +511,22 @@ uint32_t calculateCRC32(const uint8_t *data, size_t length)
 	return crc;
 }
 
+void adjustDST(void)
+{
+	if (weekday() == 1 && month() == 10 && day() >= 25 && day() <= 31 && hour() == 3 && DST == 1)
+	{
+		adjustTime(-3600);
+		DST = 0;
+		EEPROM.put(511, DST);
+		EEPROM.commit();
+		return;
+	}
+	if (weekday() == 1 && month() == 3 && day() >= 25 && day() <= 31 && hour() == 2 && DST == 0)
+	{
+		adjustTime(3600);
+		DST = 1;
+		EEPROM.put(511, DST);
+		EEPROM.commit();
+		return;
+	}
+}
