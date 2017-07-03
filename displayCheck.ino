@@ -30,11 +30,12 @@ DallasTemperature sensors(&oneWire);
 // arrays to hold device address
 DeviceAddress insideThermometer;
 
-#define MINUTES 1
+#define MINUTES 5
 float tempC;
-char ssid[] ="Termometer"; // Neame of the access point
-char auth[] = "2e46004acfa446649327e04bad56fe22"; // Authentication key to Blynk
-String message, Timestring, t_ssdi, t_pw, st, content;
+char ssid[] ="Termometer"; // Name of the access point
+char auth[] = "4645c91e8246460b9720d23691d2ce63";//"2e46004acfa446649327e04bad56fe22"; // Authentication key to Blynk
+char Timestring[14]; // Format the time output to the LCD
+String message, t_ssdi, t_pw, st, content;
 // IPAddress currentIP;
 unsigned long Myhour, Myminute, Mysecond, Myyear, Mymonth, Myday, leap;
 byte DST; // Daylight Saving flag
@@ -50,7 +51,7 @@ BlynkTimer SleepTimer;
 struct
 {
 	unsigned long currentSecond;
-	uint32_t PWonFlag; // Flag for indicating return from sleep
+	uint32_t PWonFlag; // Flag to get NTP on power on or every hour
 	uint32_t DoNotConnect; // Flag for not connecting
 	uint32_t crc;
 }rtcData;
@@ -73,8 +74,7 @@ void setup()
 		// Data not consistent - clear all
 		rtcData.currentSecond = 0;
 		rtcData.DoNotConnect = 0;
-		rtcData.PWonFlag = 0;
-		Serial.println("Wrong CRC");
+		rtcData.PWonFlag = 12;
 	}
 	rtcData.currentSecond += MINUTES * 60;
 	setTime(rtcData.currentSecond); // set internal timer
@@ -82,7 +82,6 @@ void setup()
 	EEPROM.get(0, epromdata);
 	numnets = epromdata[0];
 	DST = epromdata[511];
-	Serial.println(String("\nDST flag = ") + DST);
 	adjustDST();
 	pinMode(led, OUTPUT);
 	digitalWrite(led, 1);
@@ -98,8 +97,6 @@ void setup()
 	MyLcd.setCursor(0, 0);
 
 	int n = WiFi.scanNetworks(); //  Check if any WiFi in grange
-	Serial.print("Do not connect ");
-	Serial.println(rtcData.DoNotConnect);
 	if (!n || rtcData.DoNotConnect == 5)
 	{
 	// No access points in range - just be a thermometer
@@ -117,7 +114,7 @@ void setup()
 		MyLcd.clearDisplay();
 		MyLcd.setFont();
 		GetNtpTime();
-		Blynk.config(auth);
+		Blynk.config(auth, IPAddress(84,40,82,37));
 	}
 	break;
 	case 1: //A known network does not connect
@@ -237,22 +234,21 @@ void GetNtpTime(void)
 {
 //	currentIP = WiFi.localIP();
 	message = "Connected";
-	Serial.print("PWonflag: ");
-	Serial.println(rtcData.PWonFlag);
 
-	if (rtcData.PWonFlag != 7) // Either power on or no NTP time yet
+	if (rtcData.PWonFlag == 12) // Either power on or no NTP time yet or an hour not elapced
 	{
 		rtcData.currentSecond = UnixTimeSec() + 3600 * 2; // Unix Seconds adjusted for the local time
 		if (rtcData.currentSecond == 3600 * 2)
 		{
 			return; // No connection to NTP
 		}
+		Serial.println("Enter!");
 		setTime(rtcData.currentSecond); // set internal timer
-		Serial.println(String("Current time: ") + hour() + ":" + minute() + ":" + second());
 		if (DST) adjustTime(3600);
-		Serial.println(String("Adjusted time: ") + hour() + ":" + minute() + ":" + second());
-		rtcData.PWonFlag = 7;
+		rtcData.PWonFlag = 0;
 	}
+	Serial.println(String("PwonFlag: ") + rtcData.PWonFlag);
+	rtcData.PWonFlag++;
 	// Populate date/time variables
 	Mysecond = second();
 	Myminute = minute();
@@ -264,30 +260,29 @@ void GetNtpTime(void)
 
 void ShowDisplay(void)
 {
-	String Date=String(day()), Month=String(month()), Hour=String(hour()), Minute=String(minute());
-	if (day() < 10) Date = "0" + Date;
-	if (month() < 10) Month = "0" + Month;
-	if (hour() < 10) Hour = "0" + Hour;
-	if (minute() < 10) Minute = "0" + Minute;
-	Timestring = Hour + ":" +  Minute + "   " + Date + "." + Month;
+	sprintf(Timestring, "%02d:%02d   %02d.%02d",hour(),minute(),day(), month());
 	MyLcd.clearDisplay();
 	MyLcd.setTextSize(1);
 	MyLcd.setFont();
-	MyLcd.setCursor(0, 0);
+	MyLcd.setCursor(2, 0);
 	MyLcd.print(Timestring);
 	MyLcd.setFont(&FreeSansBold12pt7b);
 	sensors.requestTemperatures();
 	tempC = floor(sensors.getTempC(insideThermometer) * 10 + 0.5) / 10;
-	MyLcd.setCursor(16, 30);
-	if (tempC < 0) MyLcd.setCursor(12, 30);
+	MyLcd.setCursor(16, 27);
+	if (tempC < 0) MyLcd.setCursor(12, 27);
 	MyLcd.print(tempC, 1);
 	MyLcd.setFont();
 	MyLcd.setCursor(68, 8);
 	MyLcd.setTextSize(2);
 	MyLcd.print("o");
 	MyLcd.setTextSize(1);
-	MyLcd.setCursor((84 - 6 * message.length()) / 2, 38);
+	MyLcd.setCursor((84 - 6 * message.length()) / 2, 31);
 	MyLcd.print(message);
+	MyLcd.setCursor(0, 40);
+	MyLcd.print(String("Battery ")+String(BatteryV, 2));
+	MyLcd.setCursor(78, 40);
+	MyLcd.print("V");
 	MyLcd.display();
 }
 
@@ -319,6 +314,8 @@ void SleepTFunc()
 	// Now push the values
 	Blynk.virtualWrite(V5, tempC);
 	Blynk.virtualWrite(V4, BatteryV);
+	Blynk.virtualWrite(V6, Timestring);
+
 
 	if (!ReadStatus) return; // No value of the button yet
 	if (pinValue) // Light is not ON - going to sleep
