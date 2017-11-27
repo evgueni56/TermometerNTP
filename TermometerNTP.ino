@@ -30,10 +30,9 @@ DallasTemperature sensors(&oneWire);
 // arrays to hold device address
 DeviceAddress insideThermometer;
 
-#define MINUTES 5
 float tempC;
 char ssid[] ="Termometer"; // Name of the access point
-char auth[] = "4645c91e8246460b9720d23691d2ce63";//"2e46004acfa446649327e04bad56fe22"; // Authentication key to Blynk
+char auth[] = "200f39268733491caf0bc157ead14d93";//"2e46004acfa446649327e04bad56fe22"; // Authentication key to Blynk
 char Timestring[14]; // Format the time output to the LCD
 String message, t_ssdi, t_pw, st, content;
 // IPAddress currentIP;
@@ -45,6 +44,7 @@ char epromdata[512];
 const int led = 0;
 int pinValue = 1;
 int ReadStatus = 0;
+int BlynkSTimeout = 0;
 float BatteryV;
 //Timer instantiate
 BlynkTimer SleepTimer;
@@ -53,6 +53,8 @@ struct
 	unsigned long currentSecond;
 	uint32_t PWonFlag; // Flag to get NTP on power on or every hour
 	uint32_t DoNotConnect; // Flag for not connecting
+	uint32_t MINUTES;
+	uint32_t TimeSpent;
 	uint32_t crc;
 }rtcData;
 
@@ -68,6 +70,7 @@ Adafruit_PCD8544 MyLcd = Adafruit_PCD8544(12, 5, 4); //software SPI - is it bett
 void setup()
 {	
 	Serial.begin(74880);
+	WiFi.softAPdisconnect(); // Cleanup - might be up from previuos session
 	ESP.rtcUserMemoryRead(0, (uint32_t *) &rtcData, sizeof(rtcData)); 
 	if (rtcData.crc != calculateCRC32((uint8_t *)&rtcData, sizeof(rtcData) - 4)) // Check data integrity
 	{
@@ -75,8 +78,10 @@ void setup()
 		rtcData.currentSecond = 0;
 		rtcData.DoNotConnect = 0;
 		rtcData.PWonFlag = 12;
+		rtcData.MINUTES = 5;
+		rtcData.TimeSpent = 0;
 	}
-	rtcData.currentSecond += MINUTES * 60;
+	rtcData.currentSecond += rtcData.MINUTES * 60;
 	setTime(rtcData.currentSecond); // set internal timer
 	EEPROM.begin(512);
 	EEPROM.get(0, epromdata);
@@ -90,7 +95,7 @@ void setup()
 
 	// Nokia Display
 	MyLcd.begin();
-	MyLcd.setContrast(50);
+	MyLcd.setContrast(60);
 	MyLcd.setTextColor(BLACK);
 	MyLcd.clearDisplay();
 	MyLcd.setFont();
@@ -102,7 +107,7 @@ void setup()
 	// No access points in range - just be a thermometer
 		message = "No WiFi around";
 		SleepTimer.setInterval(5 * 1000, SleepTFunc);
-		wifi_cause = 0;
+		wifi_cause = 5;
 		return;
 	}
 // Check for known access points to connect
@@ -113,8 +118,8 @@ void setup()
 	{
 		MyLcd.clearDisplay();
 		MyLcd.setFont();
-		GetNtpTime();
-		Blynk.config(auth, IPAddress(84,40,82,37));
+		UnixTimeSec();
+		Blynk.config(auth/*, IPAddress(84,40,82,37)*/);
 	}
 	break;
 	case 1: //A known network does not connect
@@ -142,7 +147,7 @@ void setup()
 	break;
 	}
 
-	SleepTimer.setInterval(5 * 1000, SleepTFunc);
+	SleepTimer.setInterval(1 * 1000, SleepTFunc);
 
 }
 
@@ -151,12 +156,13 @@ void loop()
 	if(wifi_cause)
 	{
 		server.handleClient();
+		SleepTimer.run();
 	}
 	else
 	{
 		SleepTimer.run();
 		Blynk.run();
-		//	digitalWrite(led, 0);
+//		SleepTFunc();
 		ShowDisplay();
 		BatteryV = float(analogRead(A0) / float(1024)*8.86);
 	}
@@ -170,7 +176,7 @@ void SetupTemeratureSensor()
 	sensors.setResolution(insideThermometer, 12);
 }
 
-unsigned long UnixTimeSec ()
+unsigned long GetNtpTime ()
 {
 	int cb = 0;
 	WiFiUDP udp;
@@ -230,24 +236,25 @@ unsigned long UnixTimeSec ()
 	return epoch;
 }
 
-void GetNtpTime(void)
+void UnixTimeSec(void)
 {
 //	currentIP = WiFi.localIP();
 	message = "Connected";
 
 	if (rtcData.PWonFlag == 12) // Either power on or no NTP time yet or an hour not elapced
 	{
-		rtcData.currentSecond = UnixTimeSec() + 3600 * 2; // Unix Seconds adjusted for the local time
+
+		rtcData.currentSecond = GetNtpTime() + 3600 * 2; // Unix Seconds adjusted for the local time
+
 		if (rtcData.currentSecond == 3600 * 2)
 		{
 			return; // No connection to NTP
 		}
-		Serial.println("Enter!");
+//		Serial.println("Enter!");
+		if (DST) rtcData.currentSecond += 3600;
 		setTime(rtcData.currentSecond); // set internal timer
-		if (DST) adjustTime(3600);
 		rtcData.PWonFlag = 0;
 	}
-	Serial.println(String("PwonFlag: ") + rtcData.PWonFlag);
 	rtcData.PWonFlag++;
 	// Populate date/time variables
 	Mysecond = second();
@@ -290,8 +297,23 @@ BLYNK_WRITE(V0)
 {
 	pinValue = param.asInt(); // assigning incoming value from pin V0 to a variable
 	digitalWrite(led, pinValue);
-	ReadStatus = 1;
+	ReadStatus ++;
+	Serial.println("Got the button");
 }
+
+BLYNK_WRITE(V1)
+{
+	rtcData.MINUTES = param.asInt(); // read sleep time
+	ReadStatus++;
+//	Serial.println(String("Minutes: ") + rtcData.MINUTES);
+}
+
+//BLYNK_WRITE(V7)
+//{
+//	MyLcd.setContrast(param.asInt()); // Adjust contrast from Blynk
+//	MyLcd.display();
+//	ReadStatus++;
+//}
 
 BLYNK_CONNECTED()
 {
@@ -304,28 +326,31 @@ void SleepTFunc()
 	// No inernet connection - just sleep
 	if (rtcData.DoNotConnect==5)
 	{ 
-		Serial.println("No connection mode");
 		rtcData.crc = calculateCRC32((uint8_t *)&rtcData, sizeof(rtcData) - 4);
 		ESP.rtcUserMemoryWrite(0, (uint32_t *)&rtcData, sizeof(rtcData)); // Store the persistent data before sleep
-		ESP.deepSleep(MINUTES * 60 * 1000 * 1000); // deep sleep for MINUTES
+		ESP.deepSleep(rtcData.MINUTES * 60 * 1000 * 1000); // deep sleep for MINUTES
 		delay(500);
 	}
-	if (!Blynk.connected()) return; // Not yet connected to server
-	// Now push the values
+	if (!Blynk.connected()) // Not yet connected to server
+	{
+		if (BlynkSTimeout >= 15) // Blynk server is down - just sleep
+		{
+			GoSleep();
+		}
+		BlynkSTimeout++;
+		return;
+	}
+		// Now push the values
+//	Blynk.virtualWrite(V3, rtcData.TimeSpent);
 	Blynk.virtualWrite(V5, tempC);
 	Blynk.virtualWrite(V4, BatteryV);
 	Blynk.virtualWrite(V6, Timestring);
+//	Serial.println(String("ReadStatus: ") + ReadStatus);
 
-
-	if (!ReadStatus) return; // No value of the button yet
+	if (ReadStatus < 2) return; // No value of the button yet
 	if (pinValue) // Light is not ON - going to sleep
 	{ 
-//		ESP.deepSleep(MINUTES * 60 * 1000 * 1000); // deep sleep for 0.5 minute
-		rtcData.currentSecond = now();
-		rtcData.crc = calculateCRC32((uint8_t *)&rtcData, sizeof(rtcData) - 4);
-		ESP.rtcUserMemoryWrite(0, (uint32_t *)&rtcData, sizeof(rtcData)); // Store the persistent data before sleep
-		ESP.deepSleep(MINUTES * 60 * 1000 * 1000); // deep sleep for MINUTES
-		delay(100);
+		GoSleep();
 	}
 	return;
 }
@@ -442,6 +467,7 @@ void launchWeb(void)
 		rtcData.DoNotConnect = 5;
 	});
 	server.begin();
+	SleepTimer.setTimeout(5 * 60 * 1000, GOrestart); // just reset if no answer
 
 }
 
@@ -526,4 +552,19 @@ void adjustDST(void)
 		EEPROM.commit();
 		return;
 	}
+}
+
+void GOrestart()
+{
+	ESP.restart();
+}
+
+void GoSleep(void)
+{
+	rtcData.TimeSpent = now() - rtcData.currentSecond;
+	rtcData.currentSecond = now();
+	rtcData.crc = calculateCRC32((uint8_t *)&rtcData, sizeof(rtcData) - 4);
+	ESP.rtcUserMemoryWrite(0, (uint32_t *)&rtcData, sizeof(rtcData)); // Store the persistent data before sleep
+	ESP.deepSleep(rtcData.MINUTES * 60 * 1000 * 1000); // deep sleep for MINUTES
+	delay(100);
 }
